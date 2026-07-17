@@ -134,7 +134,7 @@ Once these are installed you can use the yazi plugin manager to install the plug
 Use the command:
 
 ```
-ya pack -a wylie102/duckdb
+ya pkg add wylie102/duckdb
 ```
 
 in your terminal
@@ -143,30 +143,30 @@ in your terminal
 
 ### yazi.toml
 
-Then navigate to your [yazi.toml](https://yazi-rs.github.io/docs/configuration/yazi#manager.ratio) file this should be the `yazi` folder in your `config` directory
+Then navigate to your [yazi.toml](https://yazi-rs.github.io/docs/configuration/yazi#mgr.ratio) file this should be the `yazi` folder in your `config` directory
 
 and add:
 
 ```toml
 [plugin]  
-prepend_previewers = [  
-  { name = "*.csv", run = "duckdb" },  
-  { name = "*.tsv", run = "duckdb" },  
-  { name = "*.json", run = "duckdb" },  
-  { name = "*.parquet", run = "duckdb" },  
-  { name = "*.txt", run = "duckdb" },  
-  { name = "*.xlsx", run = "duckdb" },  
-  { name = "*.db", run = "duckdb" },
-  { name = "*.duckdb", run = "duckdb" }
+prepend_previewers = [
+  { url = "*.csv", run = "duckdb" },
+  { url = "*.tsv", run = "duckdb" },
+  { url = "*.json", run = "duckdb" },
+  { url = "*.parquet", run = "duckdb" },
+  { url = "*.txt", run = "duckdb" },
+  { url = "*.xlsx", run = "duckdb" },
+  { url = "*.db", run = "duckdb" },
+  { url = "*.duckdb", run = "duckdb" }
 ]
 
-prepend_preloaders = [  
-  { name = "*.csv", run = "duckdb", multi = false },  
-  { name = "*.tsv", run = "duckdb", multi = false },  
-  { name = "*.json", run = "duckdb", multi = false },  
-  { name = "*.parquet", run = "duckdb", multi = false },
-  { name = "*.txt", run = "duckdb", multi = false },  
-  { name = "*.xlsx", run = "duckdb", multi = false }
+prepend_preloaders = [
+  { url = "*.csv", run = "duckdb", multi = false },
+  { url = "*.tsv", run = "duckdb", multi = false },
+  { url = "*.json", run = "duckdb", multi = false },
+  { url = "*.parquet", run = "duckdb", multi = false },
+  { url = "*.txt", run = "duckdb", multi = false },
+  { url = "*.xlsx", run = "duckdb", multi = false }
 ]
 ```
 
@@ -196,24 +196,24 @@ This is where the configuration/settings can go ([see below](https://github.com/
 Then in your [keymap.toml](https://yazi-rs.github.io/docs/configuration/keymap) file add:
 
 ```toml
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on = "H"
-run = "plugin duckdb -1"
+run = "plugin duckdb -- --left"
 desc = "Scroll one column to the left"
 
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on = "L"
-run = "plugin duckdb +1"
+run = "plugin duckdb -- --right"
 desc = "Scroll one column to the right"
 
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on = ["g", "o"]
-run = "plugin duckdb -open"
+run = "plugin duckdb -- --open"
 desc = "open with duckdb"
 
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on = ["g", "u"]
-run = "plugin duckdb -ui"
+run = "plugin duckdb -- --ui"
 desc = "open with duckdb ui"
 
 ```
@@ -235,7 +235,7 @@ desc = "open with duckdb ui"
 Use with a larger preview window - add to your `yazi.toml`
 
 ```toml
-[manager]
+[mgr]
 ratio = [1, 2, 5]
 ```
 

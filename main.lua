@@ -1,4 +1,4 @@
---- @since 25.4.8
+--- @since 26.5.6
 -- DuckDB Plugin for Yazi
 local M = {}
 
@@ -12,6 +12,8 @@ local update_state = ya.sync(function(state, action, category, key, value)
 		return state[category][key]
 	elseif action == "check" then
 		return state[category][key] ~= nil
+	elseif action == "clear" then
+		state[category] = {}
 	else
 		ya.err("Unknown action: " .. tostring(action))
 	end
@@ -38,7 +40,7 @@ local function is_on_list(category, cache_str)
 end
 
 local function clear_list(category)
-	set_opts(category, {}) -- replaces the whole list with an empty table
+	update_state("clear", category)
 end
 
 local function add_queries_to_table(target_table, queries)
@@ -96,7 +98,7 @@ local get_hovered_url_string = ya.sync(function()
 	return tostring(cx.active.current.hovered.url)
 end)
 
-local duckdb_opener = ya.sync(function(_, arg)
+local duckdb_opener = ya.sync(function(_, open_ui)
 	local hovered_url = Url(get_hovered_url_string())
 	local file_type = check_file_type(hovered_url)
 	local command = "duckdb "
@@ -115,7 +117,7 @@ local duckdb_opener = ya.sync(function(_, arg)
 		command = command .. tostring(hovered_url)
 	end
 
-	if arg ~= "-open" then
+	if open_ui then
 		command = string.format("%s -ui", command)
 	end
 	ya.emit("shell", { command, block = true, orphan = true, confirm = true })
@@ -123,21 +125,25 @@ end)
 
 function M:entry(job)
 	local arg = job.args and job.args[1]
-	if arg ~= "+1" and arg ~= "-1" then
-		return duckdb_opener(arg)
+	local scroll_delta
+	if job.args and job.args.left then
+		scroll_delta = -1
+	elseif job.args and job.args.right then
+		scroll_delta = 1
+	else
+		scroll_delta = tonumber(arg)
 	end
-	local scroll_delta = tonumber(arg)
 
-	if not scroll_delta then
-		ya.err("DuckDB column scroll entry: Invalid or missing scroll delta; exiting.")
-		return
+	if scroll_delta ~= -1 and scroll_delta ~= 1 then
+		local open_ui = (job.args and job.args.ui) or (not (job.args and job.args.open) and arg ~= "-open")
+		return duckdb_opener(open_ui)
 	end
 
 	local scrolled_columns = get_opts("scrolled_columns") or 0
 	scrolled_columns = math.max(0, scrolled_columns + scroll_delta)
 	set_opts("scrolled_columns", scrolled_columns)
 
-	ya.emit("seek", { "lateral scroll" })
+	ya.emit("peek", { force = true })
 end
 
 -- Setup from init.lua: require("duckdb"):setup({ mode = "standard"/"summarized" })
@@ -298,15 +304,16 @@ local function run_query(job, query, target, file_type)
 	-- Add query or list of queries
 	add_queries_to_table(args, query)
 
-	local child = Command("duckdb"):arg(args):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
+	local child, spawn_err = Command("duckdb"):arg(args):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
 	if not child then
-		ya.err("Failed to spawn DuckDB")
+		ya.err("Failed to spawn DuckDB: " .. tostring(spawn_err or "unknown error"))
 		return nil
 	end
 
 	local output, err = child:wait_with_output()
-	if err or not output.status.success then
-		ya.err("DuckDB error: " .. (err or output.stderr or "[unknown error]"))
+	if err or not output or not output.status.success then
+		local message = err or (output and output.stderr) or "unknown error"
+		ya.err("DuckDB error: " .. tostring(message))
 		return nil
 	end
 
@@ -423,7 +430,7 @@ set variable included_columns = (
 	)
 
 	local filtered_select = string.format(
-		"select %scolumns(c -> list_contains(getvariable('included_columns'), c)) from %s limit %d offset %d;",
+		"select %scolumns(lambda c: list_contains(getvariable('included_columns'), c)) from %s limit %d offset %d;",
 		row_id_prefix,
 		target,
 		limit,
@@ -575,10 +582,7 @@ end
 
 local function output_is_valid(output, mode, job)
 	if output then
-		if output.stderr and output.stderr ~= "" then
-			ya.err("DuckDB returned an error or:\n" .. output.stderr)
-			return false
-		elseif not output.stdout or output.stdout == "" then
+		if not output.stdout or output.stdout == "" then
 			ya.err(string.format("Peek - No stdout/stderr from %s cache for %s", mode, job.file.url))
 			return false
 		else
@@ -672,23 +676,18 @@ local function create_cache(job, mode, file_type, limit)
 	local base_query = generate_preload_query(job, mode, file_type, limit)
 	local query = string.format("COPY (%s) TO '%s' (FORMAT 'parquet');", base_query, target)
 	local output = run_query(job, query, nil, file_type)
-	ya.dbg("stdout: " .. tostring(output.stdout))
-	ya.dbg("stderr: " .. tostring(output.stderr))
+	if output then
+		ya.dbg("stdout: " .. tostring(output.stdout))
+		ya.dbg("stderr: " .. tostring(output.stderr))
+	end
 
-	if not output or (output.stderr and output.stderr ~= "") then
+	if not output then
 		ya.err(
-			output
-					and string.format(
-						"[duckdb] error creating %s cache for %s: %s",
-						mode,
-						tostring(job.file.url),
-						output.stderr
-					)
-				or string.format(
-					"[duckdb] no output returned while creating %s cache for %s",
-					mode,
-					tostring(job.file.url)
-				)
+			string.format(
+				"[duckdb] no output returned while creating %s cache for %s",
+				mode,
+				tostring(job.file.url)
+			)
 		)
 		remove_file(cache_url)
 		local result = finish_preload(false, cache_str)
@@ -758,8 +757,10 @@ function M:peek(job)
 	local query = generate_peek_query(args.target, job, args.limit, args.offset, args.file_type, args.cache_str)
 	ya.dbg("query: " .. tostring(query))
 	local output = run_query(job, query, args.target, args.file_type)
-	ya.dbg("stdout: " .. tostring(output.stdout))
-	ya.dbg("stderr: " .. tostring(output.stderr))
+	if output then
+		ya.dbg("stdout: " .. tostring(output.stdout))
+		ya.dbg("stderr: " .. tostring(output.stderr))
+	end
 	if not output_is_valid(output, args.mode, job) then
 		if args.target == args.cache_url and args.scrolled_collumns == 0 then
 			add_to_list("bad_cache", args.cache_str)
@@ -768,6 +769,7 @@ function M:peek(job)
 		elseif is_on_list("bad_cache", args.cache_str) then
 			return require("code"):peek(job)
 		end
+		return
 	end
 
 	if args.target == args.file_url and args.mode == "summarized" and not args.use_cache then
